@@ -1,6 +1,4 @@
-
 import os
-import logging
 import requests
 import json
 import urllib.parse
@@ -10,9 +8,9 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Configuration
+# Configuration - YAHAN CHANGE KIYA
 TOKEN = "8671717333:AAH0qX8O6Bg-7NLv9HUWLvsVrMB_s8dJI28"
-CHANNEL_USERNAME = "hemantscripts"
+CHANNEL_USERNAME = "hemantscripts"  # ✅ YOUR CHANNEL
 
 # Disable SSL warnings
 import urllib3
